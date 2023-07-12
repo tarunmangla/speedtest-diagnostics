@@ -96,6 +96,7 @@ func New(addr string) *Pinger {
 	var firstSequence = map[uuid.UUID]map[int]struct{}{}
 	firstSequence[firstUUID] = make(map[int]struct{})
 	timestampMap := make(map[uint16]time.Time)
+	rttMap := make(map[uint16]time.Duration)
 	return &Pinger{
 		Count:             -1,
 		Interval:          time.Second,
@@ -111,7 +112,8 @@ func New(addr string) *Pinger {
 		network:           "ip",
 		protocol:          "udp",
 		awaitingSequences: firstSequence,
-		sentTimestamps:    timestampMap,
+		SentTimestamps:    timestampMap,
+		RttMap: 		   rttMap,
 		TTL:               64,
 		logger:            StdLogger{Logger: log.New(log.Writer(), log.Prefix(), log.Flags())},
 	}
@@ -216,7 +218,11 @@ type Pinger struct {
 	// awaitingSequences are in-flight sequence numbers we keep track of to help remove duplicate receipts
 	awaitingSequences map[uuid.UUID]map[int]struct{}
 
-	sentTimestamps map[uint16]time.Time
+	// map containing the timestamp when each packet was sent
+	SentTimestamps map[uint16]time.Time
+
+	// map containing the rtts of the packets
+	RttMap map[uint16]time.Duration
 	// network is one of "ip", "ip4", or "ip6".
 	network string
 	// protocol is "icmp" or "udp".
@@ -402,6 +408,8 @@ func (p *Pinger) SetPrivileged(privileged bool) {
 func (p *Pinger) Privileged() bool {
 	return p.protocol == "icmp"
 }
+
+
 
 // SetLogger sets the logger to be used to log events from the pinger.
 func (p *Pinger) SetLogger(logger Logger) {
@@ -765,16 +773,18 @@ func (p *Pinger) processPacket(recv *packet) error {
 	case *icmp.TimeExceeded:
 		if proto == protocolICMP {
 			pktSeq := binary.BigEndian.Uint16(pkt.Data[26:])
-			if timestamp, ok := p.sentTimestamps[pktSeq]; ok {
+			if timestamp, ok := p.SentTimestamps[pktSeq]; ok {
 				inPkt.Rtt = receivedAt.Sub(timestamp)
+				p.RttMap[pktSeq] = inPkt.Rtt
 				inPkt.Seq = int(pktSeq)
 			}
 		} else {
 			if len(pkt.Data) > 40 {
 				pktSeq := binary.BigEndian.Uint16(pkt.Data[46:48])
-				if timestamp, ok := p.sentTimestamps[pktSeq]; ok {
+				if timestamp, ok := p.SentTimestamps[pktSeq]; ok {
 					inPkt.Rtt = receivedAt.Sub(timestamp)
 					inPkt.Seq = int(pktSeq)
+					p.RttMap[pktSeq] = inPkt.Rtt
 				}
 			} else {
 				fmt.Println("pkt is only bytes", len(pkt.Data))
@@ -809,7 +819,7 @@ func printBytes(decimal int) {
 
 func (p *Pinger) sendICMP(conn packetConn) error {
 	var dst net.Addr = p.ipaddr
-	fmt.Println("protocol is", p.protocol)
+	
 	if p.protocol == "udp" {
 		dst = &net.UDPAddr{IP: p.ipaddr.IP, Zone: p.ipaddr.Zone}
 	}
@@ -820,7 +830,7 @@ func (p *Pinger) sendICMP(conn packetConn) error {
 		return fmt.Errorf("unable to marshal UUID binary: %w", err)
 	}
 	sentTimestamp := time.Now()
-	p.sentTimestamps[uint16(p.sequence)] = sentTimestamp
+	p.SentTimestamps[uint16(p.sequence)] = sentTimestamp
 	t := append(timeToBytes(time.Now()), uuidEncoded...)
 	if remainSize := p.Size - timeSliceLength - trackerLength; remainSize > 0 {
 		t = append(t, bytes.Repeat([]byte{1}, remainSize)...)

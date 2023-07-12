@@ -5,12 +5,13 @@ import (
   "net"
   "github.com/google/gopacket"
   "github.com/google/gopacket/layers"
-  "sync"
+  //"sync"
   "os"
   "time"
   "github.com/google/gopacket/pcapgo"
   "github.com/google/gopacket/pcap"
 )
+
 
 
 func GetLocalIP(ver string) string {
@@ -33,27 +34,29 @@ func GetLocalIP(ver string) string {
 
 
 func GetDefaultInterface() (net.Interface, error) {
+// Get all network interfaces
   interfaces, err := net.Interfaces()
   if err != nil {
     return net.Interface{}, err
   }
+  // Find the default network interface
+  for _, iface := range interfaces {
+    if iface.Flags&net.FlagUp != 0 && iface.Flags&net.FlagLoopback == 0 {
+      addrs, err := iface.Addrs()
+      if err != nil {
+        return net.Interface{}, err
+      }
 
-	for _, iface := range interfaces {
-		addrs, err := iface.Addrs()
-		if err != nil {
-			return net.Interface{}, err
-		}
-
-		for _, addr := range addrs {
-			ipNet, ok := addr.(*net.IPNet)
-			if !ok || ipNet.IP.IsLoopback() {
-        break
-      } else {
-        return iface, nil
-			}
-		}
-	}
-	return net.Interface{}, fmt.Errorf("default interface not found")
+      for _, addr := range addrs {
+        ipnet, ok := addr.(*net.IPNet)
+        if ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+          // Found the default network interface
+          return iface, nil
+        }
+      }
+    }
+  }
+  return net.Interface{}, fmt.Errorf("default network interface not found")
 }
 
 
@@ -86,33 +89,35 @@ func IsIPv4String(address string) bool {
 
 
 
-func StartCaptureWithContext(wg *sync.WaitGroup, addr string, resultChan chan<- error) {
+func StartCaptureWithContext(addr string, resultChan chan<- string, done <-chan bool) {
   fmt.Println("starting capture")
 	// Open the default network interface for packet capture
   snaplen := int32(96)
   iface, err  := GetDefaultInterface()
   if err != nil {
-  	resultChan <- err
+  	resultChan <- ""
+    return
   }
-
-    handle, err := pcap.OpenLive(iface.Name, snaplen, true, pcap.BlockForever)
+  fmt.Println("iface is", iface)
+  handle, err := pcap.OpenLive(iface.Name, snaplen, true, pcap.BlockForever)
 	if err != nil {
-		resultChan <- fmt.Errorf("failed to open device: %w", err)
+		resultChan <- ""
 		return 
 	}
+  fmt.Println("handle is", handle)
 	defer handle.Close()
 
 	// Set a filter for capturing specific packets (optional)
   filter := fmt.Sprintf("tcp and host %s", addr)
   if err := handle.SetBPFFilter(filter); err != nil {
-		resultChan <- fmt.Errorf("failed to set BPF filter: %w", err)
+		resultChan <- ""
 		return 
 	}
 
   fileName := fmt.Sprintf("capture-%s.pcap", time.Now().Format("20060102-150405"))
   pcapFile, err := os.Create(fileName)
   if err != nil {
-		resultChan <- fmt.Errorf("failed to create PCAP file: %w", err)
+		resultChan <- ""
 		return
 	}
   defer pcapFile.Close()
@@ -121,21 +126,23 @@ func StartCaptureWithContext(wg *sync.WaitGroup, addr string, resultChan chan<- 
 
 	// Write PCAP file header
 	if err := pcapWriter.WriteFileHeader(96, handle.LinkType()); err != nil {
-		resultChan <- fmt.Errorf("failed to write PCAP file header: %w", err)
-		return 
+		resultChan <- ""
+		return
 	}
 
 	// Start capturing packets
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.Packets() {
+
+  for {
+    select {
+    case packet := <-packetSource.Packets():
 		// Write the packet to the PCAP file
-		if err := pcapWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
-			resultChan <- fmt.Errorf("failed to write packet to PCAP file: %w", err)
-			return 
-		}
-	}
-	fmt.Println("Waiting for speedtest to end")	
-  	wg.Done()
-  
-  resultChan <- nil 
+      if err := pcapWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
+			  resultChan <- ""//fmt.Errorf("failed to write packet to PCAP file: %w", err)
+			  return
+		  }
+    case <- done:
+      resultChan <- fileName
+    }
+  }
 }
