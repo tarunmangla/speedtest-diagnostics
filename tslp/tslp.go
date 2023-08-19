@@ -230,6 +230,7 @@ func GetStats(timestamps map[uint16]time.Time, rtts map[uint16]time.Duration, st
 func ProcessLatency(p *probing.Pinger, downloadEndTime int64, uploadEndTime int64) {
   diff := uploadEndTime - downloadEndTime 
   fmt.Println(downloadEndTime, uploadEndTime, diff)
+  fmt.Println(p.Ipaddr)
   GetStats(p.SentTimestamps, p.RttMap, -1, downloadEndTime, p.TTL)
   GetStats(p.SentTimestamps, p.RttMap, downloadEndTime, uploadEndTime, p.TTL)
   GetStats(p.SentTimestamps, p.RttMap, uploadEndTime, -1, p.TTL)
@@ -268,7 +269,7 @@ func main() {
     if err != nil {
       panic(err)
     }
-    pinger.SetPrivileged(false)
+    pinger.SetPrivileged(true)
     pinger.Interval = 50*time.Millisecond
     //pinger.Count = 10
     // Modify the probing code to log IP address of each ICMP timeout

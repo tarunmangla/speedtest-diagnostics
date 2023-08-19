@@ -107,13 +107,13 @@ func New(addr string) *Pinger {
 		done:              make(chan interface{}),
 		id:                r.Intn(math.MaxUint16),
 		trackerUUIDs:      []uuid.UUID{firstUUID},
-		ipaddr:            nil,
+		Ipaddr:            nil,
 		ipv4:              false,
 		network:           "ip",
 		protocol:          "udp",
 		awaitingSequences: firstSequence,
 		SentTimestamps:    timestampMap,
-		RttMap: 		   rttMap,
+		RttMap: 		       rttMap,
 		TTL:               64,
 		logger:            StdLogger{Logger: log.New(log.Writer(), log.Prefix(), log.Flags())},
 	}
@@ -200,7 +200,7 @@ type Pinger struct {
 	done chan interface{}
 	lock sync.Mutex
 
-	ipaddr *net.IPAddr
+	Ipaddr *net.IPAddr
 	addr   string
 
 	// mark is a SO_MARK (fwmark) set on outgoing icmp packets
@@ -330,16 +330,16 @@ func (p *Pinger) updateStatistics(pkt *Packet) {
 }
 
 // SetIPAddr sets the ip address of the target host.
-func (p *Pinger) SetIPAddr(ipaddr *net.IPAddr) {
-	p.ipv4 = isIPv4(ipaddr.IP)
+func (p *Pinger) SetIPAddr(Ipaddr *net.IPAddr) {
+	p.ipv4 = isIPv4(Ipaddr.IP)
 
-	p.ipaddr = ipaddr
-	p.addr = ipaddr.String()
+	p.Ipaddr = Ipaddr
+	p.addr = Ipaddr.String()
 }
 
 // IPAddr returns the ip address of the target host.
 func (p *Pinger) IPAddr() *net.IPAddr {
-	return p.ipaddr
+	return p.Ipaddr
 }
 
 // Resolve does the DNS lookup for the Pinger address and sets IP protocol.
@@ -347,14 +347,14 @@ func (p *Pinger) Resolve() error {
 	if len(p.addr) == 0 {
 		return errors.New("addr cannot be empty")
 	}
-	ipaddr, err := net.ResolveIPAddr(p.network, p.addr)
+	Ipaddr, err := net.ResolveIPAddr(p.network, p.addr)
 	if err != nil {
 		return err
 	}
 
-	p.ipv4 = isIPv4(ipaddr.IP)
+	p.ipv4 = isIPv4(Ipaddr.IP)
 
-	p.ipaddr = ipaddr
+	p.Ipaddr = Ipaddr
 
 	return nil
 }
@@ -457,7 +457,7 @@ func (p *Pinger) RunWithContext(ctx context.Context) error {
 	if p.Size < timeSliceLength+trackerLength {
 		return fmt.Errorf("size %d is less than minimum required size %d", p.Size, timeSliceLength+trackerLength)
 	}
-	if p.ipaddr == nil {
+	if p.Ipaddr == nil {
 		err = p.Resolve()
 	}
 	if err != nil {
@@ -608,7 +608,7 @@ func (p *Pinger) Statistics() *Statistics {
 		PacketLoss:            loss,
 		Rtts:                  p.rtts,
 		Addr:                  p.addr,
-		IPAddr:                p.ipaddr,
+		IPAddr:                p.Ipaddr,
 		MaxRtt:                p.maxRtt,
 		MinRtt:                p.minRtt,
 		AvgRtt:                p.avgRtt,
@@ -734,7 +734,7 @@ func (p *Pinger) processPacket(recv *packet) error {
 
 	inPkt := &Packet{
 		Nbytes: recv.nbytes,
-		IPAddr: p.ipaddr,
+		IPAddr: p.Ipaddr,
 		Addr:   p.addr,
 		TTL:    recv.ttl,
 		ID:     p.id,
@@ -818,10 +818,10 @@ func printBytes(decimal int) {
 }
 
 func (p *Pinger) sendICMP(conn packetConn) error {
-	var dst net.Addr = p.ipaddr
-	
+	var dst net.Addr = p.Ipaddr
+
 	if p.protocol == "udp" {
-		dst = &net.UDPAddr{IP: p.ipaddr.IP, Zone: p.ipaddr.Zone}
+		dst = &net.UDPAddr{IP: p.Ipaddr.IP, Zone: p.Ipaddr.Zone}
 	}
 
 	currentUUID := p.getCurrentTrackerUUID()
@@ -857,7 +857,7 @@ func (p *Pinger) sendICMP(conn packetConn) error {
 			if p.OnSendError != nil {
 				outPkt := &Packet{
 					Nbytes: len(msgBytes),
-					IPAddr: p.ipaddr,
+					IPAddr: p.Ipaddr,
 					Addr:   p.addr,
 					Seq:    p.sequence,
 					ID:     p.id,
@@ -874,7 +874,7 @@ func (p *Pinger) sendICMP(conn packetConn) error {
 		if p.OnSend != nil {
 			outPkt := &Packet{
 				Nbytes: len(msgBytes),
-				IPAddr: p.ipaddr,
+				IPAddr: p.Ipaddr,
 				Addr:   p.addr,
 				Seq:    p.sequence,
 				ID:     p.id,
